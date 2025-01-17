@@ -1,6 +1,8 @@
 # ebpf-for-gfw
 Countering GFW Active Probing with an ebpf based Whitelist Firewall
+
 This is an ebpf xdp based solution to use whitelist to block active probing from GFW.
+
 The ebpf program will check every TCP SYN packet to the VPN port (443) and server prefix (10.0.x.x).
 Will pass if it match the whitelist (the whitelist is /24 based not /32). Will drop if not.
 
