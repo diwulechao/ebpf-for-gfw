@@ -1,54 +1,66 @@
 # ebpf-for-gfw
-Countering GFW Active Probing with an ebpf based Whitelist Firewall
 
-This is an ebpf xdp based solution to use whitelist to block active probing from GFW.
+### Countering GFW Active Probing with an eBPF-Based Whitelist Firewall
 
-The ebpf program will check every TCP SYN packet to the VPN port (443) and server prefix (10.0.x.x).
-Will pass if it match the whitelist (the whitelist is /24 based not /32). Will drop if not.
+This project provides an eBPF-based XDP solution designed to counter active probing from the Great Firewall (GFW) by employing a whitelist mechanism.
 
-The ebpf program will check every UDP packet to the port range (1000-2000) and server prefix (10.0.x.x).
-Will add the source ip /24 prefix into whitelist if it match the signature set from the .ps1 script.
+---
 
-ps1 script is a windows powershell script that will try to whitelist the client's source ip every 30 seconds, this need to be running on the client side.
+## How It Works
 
-This solution is not perfect, but should be good enough. If GFW use replay attack on the UDP whitelist port, it technically might bypass the whitelist. But since GFW's active probe will not replay packet this small, even if they replay packet this small, it will unlikely to send a follow up shadowsock probe packet using the same source IP and right VPN port (very unlikely).
+### TCP Traffic
+- The eBPF program inspects every **TCP SYN** packet directed to the VPN port (`443`) and server prefix (`10.0.x.x`).
+- Packets are:
+  - **Allowed** if they match the whitelist (whitelist operates on `/24` subnets, not `/32`).
+  - **Dropped** if they do not match.
 
-To make this solution better, the XDP should send a challenge back to the ps1 script and ps1 script need to sign it and send it to the XDP again. XDP validate the sign and add to whitelist only if sign is correct. 
+### UDP Traffic
+- The eBPF program monitors **UDP** packets directed to a specified port range (`1000-2000`) and the server prefix (`10.0.x.x`).
+- If a packet matches the signature set by the `.ps1` script, the source IP `/24` prefix is added to the whitelist.
 
-Better solution (stateless, easier to implement than stateful) Example:
+---
 
-step1 legit client -> server: hello
+## Client-Side Script
+A **Windows PowerShell script (`.ps1`)**:
+- Runs on the client side.
+- Attempts to whitelist the client's source IP every 30 seconds.
 
-step2 server -> legit client: client's source IP
+---
 
-step3 legit client -> server: hash(data from step2)
+## Limitations
+This solution is not perfect:
+- **Replay Attacks**: If GFW performs a replay attack on the UDP whitelist port, it may bypass the whitelist. However:
+  - GFW's active probes are unlikely to replay packets this small.
+  - Even if replayed, it is improbable to use the same source IP and correct VPN port for a follow-up Shadowsocks probe.
 
-step4 server add legit client's source ip into whitelist if data from step3 match hash(source ip)
+---
 
+## Potential Improvements
 
-step5 GFW probe -> server hello
+### Stateless Challenge-Response Mechanism
+1. **Legit Client** → **Server**: `hello`
+2. **Server** → **Legit Client**: Responds with the client’s source IP.
+3. **Legit Client** → **Server**: Returns a hash of the data from Step 2.
+4. **Server**: Adds the client’s source IP to the whitelist if the hash matches.
 
-step6 server -> GFW probe : probe's source IP
+- **GFW Probe Example**:
+  - **GFW Probe** → **Server**: `hello`
+  - **Server** → **Probe**: Probe’s source IP.
+  - **Probe** → **Server**: A replay hash of a legit client’s source IP.
+  - Mismatch between hashes → Probe fails.
 
-step7 GFW probe -> server: hash(legit client's source IP) this is a replay
+### Stateful Challenge-Response Mechanism
+Requires an **eBPF LRU Map** to store random challenges.
 
-step8 hash(probe's source ip) != hash(legit client's source IP) do nothing
+1. **Legit Client** → **Server**: `hello`
+2. **Server** → **Legit Client**: Sends a `random_number` and stores it (`ebpf_lru_map[client_source_ip] = random_number`).
+3. **Legit Client** → **Server**: Returns a hash of the random number.
+4. **Server**: Adds the client’s source IP to the whitelist if the hash matches.
 
-Stateful solution is more replay proof, but need ebpf LRU map to store the random challenge
+- **GFW Probe Example**:
+  - **GFW Probe** → **Server**: `hello`
+  - **Server** → **Probe**: Sends a different random number and stores it (`ebpf_lru_map[probe_source_ip] = another_random_number`).
+  - **Probe** → **Server**: Replays a hash of the previous challenge.
+  - Mismatch between hashes → Probe fails.
 
-step1 legit client -> server: hello
-
-step2 server -> legit client: random_number (server set ebpf_lru_map[client_source_ip] = random_number)
-
-step3 legit client -> server: hash(random_number from step2)
-
-step4 server add legit client's source ip into whitelist if data from step3 match hash(ebpf_lru_map[client_source_ip])
-
-
-step5 GFW probe -> server hello
-
-step6 server -> GFW probe : another_random_number  (server set ebpf_lru_map[probe_source_ip] = another_random_number)
-
-step7 GFW probe -> server: hash(random_number from step2) this is a replay
-
-step8 hash(random_number from step2) != hash(ebpf_lru_map[probe_source_ip]) do nothing
+---
