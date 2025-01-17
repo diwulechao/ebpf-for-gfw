@@ -16,13 +16,21 @@ This solution is not perfect, but should be good enough. If GFW use replay attac
 To make this solution better, the XDP should send a challenge (client's source ip for example) back to the ps1 script and ps1 script need to sign it (hash(source ip) for example) and send it to the XDP again. XDP validate the sign and add to whitelist only if sign is correct. And this is stateless means it is much easier to implement in ebpf XDP.
 
 Beter solution Example:
+
 step1 legit client -> server: hello
+
 step2 server -> legit client: client's source IP
+
 step3 legit client -> server: hash(data from step2)
+
 step4 server add legit client's source ip into whitelist if data from step3 match hash(source ip)
 
+
 step5 GFW probe -> server hello
+
 step6 server -> GFW probe -> probe's source IP
+
 step7 GFW probe -> server: hash(legit client's source IP) this is a replay
+
 step8 hash(probe's source ip) != hash(legit client's source IP) do nothing
 
